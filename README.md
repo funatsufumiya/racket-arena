@@ -2,10 +2,18 @@
 
 Experimental implementation of arena (memory segment) for Racket.
 
-# test
+# test (install)
 
 ```bash
-$ make build # build package using cargo (rust)
-$ make install # install package using raco
-$ make check # run examples for check
+# optional: build package using cargo (rust)
+$ make build 
+
+# install package using raco
+$ make install 
+
+# run examples for check
+$ make check 
+
+# optional: performance-check (memory bench)
+$ make performance-check
 ```

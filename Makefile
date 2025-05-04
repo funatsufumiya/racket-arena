@@ -14,6 +14,9 @@ check: all
 	racket examples/low-layer.rkt
 	racket examples/high-layer.rkt
 
+performance-check: all
+	racket examples/performance-check.rkt
+
 test: check
 
 install: all

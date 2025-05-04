@@ -32,8 +32,8 @@ else
 endif
 
 check: all
-	racket examples/low-layer.rkt
 	racket examples/high-layer.rkt
+	racket examples/low-layer.rkt
 
 performance-check: all
 	racket examples/performance-check.rkt

@@ -156,6 +156,9 @@
   (printf "~a " (cities i)))
 (printf "\n")
 
+;; Cleanup
+(destroy-arena update-arena)
+
 (printf "\n")
 (printf "=== Low-level API example ===\n")
 

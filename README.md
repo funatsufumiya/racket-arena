@@ -1,6 +1,6 @@
 # racket-arena
 
-Arena allocation (memory segment) for Racket.
+Arena allocator (memory segment) for Racket.
 
 This maybe useful to avoid specific kind of GC (memory usage) problem.
 

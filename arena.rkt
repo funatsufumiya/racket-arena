@@ -349,24 +349,43 @@
 (define-all-arrays)
 
 ;; ======== String Operations ========
-;; Allocate a string in the arena
-(define (arena-string arena str)
-  (define len (string-length str))
-  (define bytes (+ len 1))  ;; Extra byte for NULL terminator
-  (define ptr (arena bytes))
+;; Allocate a string in the arena with specified capacity
+(define (arena-string arena str [capacity (string-length str)])
+  ;; Ensure capacity is at least as large as the string
+  (when (< capacity (string-length str))
+    (error 'arena-string "capacity (~a) must be >= string length (~a)" 
+           capacity (string-length str)))
   
-  ;; Copy string data & NULL terminator
-  (for ([i (in-range len)]
+  (define str-len (string-length str))
+  ;; Layout: [capacity(8 bytes)][current-length(8 bytes)][string-data(capacity+1 bytes)]
+  ;; Note: +1 for NULL terminator
+  (define header-size 16) ;; 8 bytes capacity + 8 bytes length
+  (define total-size (+ header-size capacity 1)) ;; +1 for NULL terminator
+  
+  (define ptr (arena total-size))
+  
+  ;; Set header information
+  (ptr-set! ptr _uint64 capacity)             ;; Store maximum capacity
+  (ptr-set! (ptr-add ptr 8) _uint64 str-len)  ;; Store current length
+  
+  ;; Copy string data
+  (for ([i (in-range str-len)]
         [c (in-string str)])
-    (ptr-set! (ptr-add ptr i) _byte (char->integer c)))
-  (ptr-set! (ptr-add ptr len) _byte 0)
+    (ptr-set! (ptr-add ptr (+ header-size i)) _byte (char->integer c)))
+  
+  ;; Add NULL terminator
+  (ptr-set! (ptr-add ptr (+ header-size str-len)) _byte 0)
   
   ;; Return a multi-dispatch function
   (case-lambda
-    [() (cast ptr _pointer _string/utf-8)]
+    [() (cast (ptr-add ptr header-size) _pointer _string/utf-8)]
     [(arg) (cond
-             [(eq? arg 'ptr) ptr]
+             [(eq? arg 'ptr) (ptr-add ptr header-size)] ;; Return pointer to string data
+             [(eq? arg 'raw-ptr) ptr]                   ;; Return pointer to header
              [(eq? arg 'arena) arena]
+             [(eq? arg 'capacity) (ptr-ref ptr _uint64)]
+             [(eq? arg 'length) (ptr-ref (ptr-add ptr 8) _uint64)]
+             [(eq? arg 'size) (ptr-ref (ptr-add ptr 8) _uint64)]
              [else (error "Invalid argument to string function")])]))
 
 ;; Read string from pointer (when needed)
@@ -524,6 +543,7 @@
            [(eq? arg 'field-offsets) field-offsets]
            [(eq? arg 'size) (ptr-ref (ptr-add ptr 8) _uint64)]
            [(eq? arg 'capacity) (ptr-ref ptr _uint64)]
+           [(eq? arg 'arena) arena]
            [else (error "Invalid argument to struct array function")]))]
       [else (error "Too many arguments provided to array function")])))
 
@@ -607,6 +627,233 @@
          arena-cstruct-array-pop!
          arena-cstruct-array-clear!)
 
+;; Allocate an array of strings in the arena
+(define (arena-string-array arena strings [capacity (length strings)] [string-capacity #f])
+  ;; Ensure capacity is at least the size of initial values
+  (when (< capacity (length strings))
+    (error 'arena-string-array "capacity (~a) must be >= length of strings (~a)" 
+           capacity (length strings)))
+  
+  ;; If string-capacity not specified, calculate from max string length
+  (define max-str-len 
+    (if (null? strings) 
+        0
+        (apply max (map string-length strings))))
+  
+  (define str-capacity 
+    (if string-capacity
+        (begin
+          ;; Verify string-capacity is sufficient
+          (when (and (> max-str-len 0) (< string-capacity max-str-len))
+            (error 'arena-string-array 
+                   "string-capacity (~a) must be >= longest string (~a chars)"
+                   string-capacity max-str-len))
+          string-capacity)
+        max-str-len))
+  
+  ;; Calculate memory layout
+  ;; [array-capacity(8)][current-size(8)][str-capacity(8)][data-ptrs(capacity*8)]
+  (define header-size 24) ;; 8 bytes array capacity + 8 bytes size + 8 bytes string capacity
+  (define ptr-size 8)     ;; Size of each pointer
+  (define ptr-section-size (* capacity ptr-size))
+  (define base-size (+ header-size ptr-section-size))
+  
+  ;; Allocate main array structure
+  (define base-ptr (arena base-size))
+  
+  ;; Set header information
+  (ptr-set! base-ptr _uint64 capacity)            ;; Store maximum capacity
+  (ptr-set! (ptr-add base-ptr 8) _uint64 (length strings))  ;; Store current size
+  (ptr-set! (ptr-add base-ptr 16) _uint64 str-capacity)    ;; Store string capacity
+  
+  ;; Now allocate and set up each string
+  (for ([i (in-range (length strings))]
+        [str (in-list strings)])
+    (define str-len (string-length str))
+    
+    ;; Allocate memory for this string (with header)
+    ;; [length(8)][string-data(str-capacity+1)]
+    (define str-header-size 8)  ;; Just need to store current length
+    (define str-ptr (arena (+ str-header-size str-capacity 1))) ;; +1 for NULL
+    
+    ;; Set string header (just length)
+    (ptr-set! str-ptr _uint64 str-len)
+    
+    ;; Copy string data
+    (for ([j (in-range str-len)]
+          [c (in-string str)])
+      (ptr-set! (ptr-add str-ptr (+ str-header-size j)) _byte (char->integer c)))
+    
+    ;; Add NULL terminator
+    (ptr-set! (ptr-add str-ptr (+ str-header-size str-len)) _byte 0)
+    
+    ;; Store pointer to this string in the main array
+    (ptr-set! (ptr-add base-ptr (+ header-size (* i ptr-size))) 
+              _pointer str-ptr))
+  
+  ;; Return the multi-dispatch function
+  (lambda args
+    (cond
+      [(null? args) 
+       (error "Index required to access string in array")]
+      [(= (length args) 1)
+       (let ([arg (car args)])
+         (cond
+           [(number? arg)  ;; Access by index
+            (define current-size (ptr-ref (ptr-add base-ptr 8) _uint64))
+            (if (< arg current-size)
+                (let* ([str-ptr-offset (+ header-size (* arg ptr-size))]
+                       [str-ptr (ptr-ref (ptr-add base-ptr str-ptr-offset) _pointer)]
+                       [str-len (ptr-ref str-ptr _uint64)]
+                       [str-data-ptr (ptr-add str-ptr 8)])
+                  ;; Return a function that gives access to the string
+                  (lambda maybe-args
+                    (if (null? maybe-args)
+                        ;; Direct call returns the string value
+                        (cast str-data-ptr _pointer _string/utf-8)
+                        ;; With args, provide metadata access
+                        (let ([arg (car maybe-args)])
+                          (cond
+                            [(eq? arg 'ptr) str-data-ptr]
+                            [(eq? arg 'raw-ptr) str-ptr]
+                            [(eq? arg 'length) str-len]
+                            [(eq? arg 'capacity) (ptr-ref (ptr-add base-ptr 16) _uint64)]
+                            [(eq? arg 'arena) arena]
+                            [else (error "Invalid string accessor")])))))
+                (error 'arena-string-array "index out of bounds: ~a (size: ~a)"
+                       arg current-size))]
+           [(eq? arg 'ptr) base-ptr]
+           [(eq? arg 'arena) arena]
+           [(eq? arg 'size) (ptr-ref (ptr-add base-ptr 8) _uint64)]
+           [(eq? arg 'capacity) (ptr-ref base-ptr _uint64)]
+           [(eq? arg 'string-capacity) (ptr-ref (ptr-add base-ptr 16) _uint64)]
+           [else (error "Invalid argument to string array function")]))]
+      [else (error "Too many arguments provided to string array function")])))
+
+;; Set a string in the array
+(define (set-arena-string-array! array-fn index new-string)
+  (define current-size (array-fn 'size))
+  
+  ;; Check bounds
+  (unless (< index current-size)
+    (error 'set-arena-string-array! "index out of bounds: ~a (size: ~a)" 
+           index current-size))
+  
+  (define str-fn (array-fn index))
+  (define str-capacity (array-fn 'string-capacity))
+  (define new-len (string-length new-string))
+  
+  ;; Check capacity
+  (when (> new-len str-capacity)
+    (error 'set-arena-string-array! 
+           "new string (~a chars) exceeds allocated capacity (~a chars)" 
+           new-len str-capacity))
+  
+  (define str-ptr (str-fn 'raw-ptr))
+  
+  ;; Update the string length
+  (ptr-set! str-ptr _uint64 new-len)
+  
+  ;; Copy new string data
+  (define str-header-size 8)
+  (for ([i (in-range new-len)]
+        [c (in-string new-string)])
+    (ptr-set! (ptr-add str-ptr (+ str-header-size i)) _byte (char->integer c)))
+  
+  ;; Add NULL terminator
+  (ptr-set! (ptr-add str-ptr (+ str-header-size new-len)) _byte 0))
+
+;; Push a string to the array
+(define (arena-string-array-push! array-fn new-string)
+  (define current-size (array-fn 'size))
+  (define capacity (array-fn 'capacity))
+  (define str-capacity (array-fn 'string-capacity))
+  (define new-len (string-length new-string))
+  
+  ;; Check if array is full
+  (if (>= current-size capacity)
+      #f  ;; Return false if full
+      (let ()
+        ;; Check string capacity
+        (when (> new-len str-capacity)
+          (error 'arena-string-array-push! 
+                 "new string (~a chars) exceeds allocated capacity (~a chars)" 
+                 new-len str-capacity))
+        
+        (define base-ptr (array-fn 'ptr))
+        
+        ;; Allocate memory for the new string (with header)
+        (define arena (array-fn 'arena))
+        (define str-header-size 8)
+        (define str-ptr (arena (+ str-header-size str-capacity 1))) ;; +1 for NULL
+        
+        ;; Set string header
+        (ptr-set! str-ptr _uint64 new-len)
+        
+        ;; Copy string data
+        (for ([i (in-range new-len)]
+              [c (in-string new-string)])
+          (ptr-set! (ptr-add str-ptr (+ str-header-size i)) _byte (char->integer c)))
+        
+        ;; Add NULL terminator
+        (ptr-set! (ptr-add str-ptr (+ str-header-size new-len)) _byte 0)
+        
+        ;; Calculate header and store pointer to this string in the main array
+        (define header-size 24)
+        (define ptr-size 8)
+        (ptr-set! (ptr-add base-ptr (+ header-size (* current-size ptr-size))) 
+                  _pointer str-ptr)
+        
+        ;; Update size
+        (ptr-set! (ptr-add base-ptr 8) _uint64 (add1 current-size))
+        
+        ;; Return success
+        #t)))
+
+;; Pop a string from the array
+(define (arena-string-array-pop! array-fn)
+  (define current-size (array-fn 'size))
+  
+  ;; Check if array is empty
+  (if (= current-size 0)
+      #f  ;; Return false if empty
+      (let ()
+        (define base-ptr (array-fn 'ptr))
+        (define header-size 24)
+        (define ptr-size 8)
+        
+        ;; Get the last string
+        (define last-idx (sub1 current-size))
+        (define last-str-fn (array-fn last-idx))
+        (define last-str (last-str-fn))
+        
+        ;; Note: We don't actually free the memory in the arena,
+        ;; since arena allocator doesn't support individual frees
+        ;; The pointer space in the array is simply reused later
+        
+        ;; Update size
+        (ptr-set! (ptr-add base-ptr 8) _uint64 last-idx)
+        
+        ;; Return the popped string
+        last-str)))
+
+;; Clear the string array
+(define (arena-string-array-clear! array-fn)
+  (define base-ptr (array-fn 'ptr))
+  
+  ;; Reset size to 0 (capacity remains the same)
+  (ptr-set! (ptr-add base-ptr 8) _uint64 0)
+  
+  ;; Return void
+  (void))
+
+;; Provide the string array functions
+(provide arena-string-array
+         set-arena-string-array!
+         arena-string-array-push!
+         arena-string-array-pop!
+         arena-string-array-clear!)
+
 ;; ======== Setter Functions for Primitive Types ========
 ;; Macro to generate primitive type setters
 (define-syntax (define-primitive-setter stx)
@@ -683,32 +930,30 @@
 (define-all-array-setters)
 
 ;; ======== String Setter Function ========
-;; Set a new string value
+;; Set a new string value with capacity check
 (define (set-arena-string! str-fn new-string)
-  (define ptr (str-fn 'ptr))
-  (define old-string (str-fn))
-  (define old-len (string-length old-string))
+  (define raw-ptr (str-fn 'raw-ptr))
+  (define capacity (str-fn 'capacity))
   (define new-len (string-length new-string))
   
-  ;; Check if new string fits in the allocated memory
-  ;; (allowing for NULL terminator)
-  (when (> (+ new-len 1) (+ old-len 1))
+  ;; Check if new string fits in the allocated capacity
+  (when (> new-len capacity)
     (error 'set-arena-string! 
-           "new string (~a chars) is longer than allocated space (~a chars)" 
-           new-len old-len))
+           "new string (~a chars) exceeds allocated capacity (~a chars)" 
+           new-len capacity))
+  
+  ;; Define header size
+  (define header-size 16)
+  ;; Update the string length in header
+  (ptr-set! (ptr-add raw-ptr 8) _uint64 new-len)
   
   ;; Copy new string data
   (for ([i (in-range new-len)]
         [c (in-string new-string)])
-    (ptr-set! (ptr-add ptr i) _byte (char->integer c)))
+    (ptr-set! (ptr-add raw-ptr (+ header-size i)) _byte (char->integer c)))
   
   ;; Add NULL terminator
-  (ptr-set! (ptr-add ptr new-len) _byte 0)
-  
-  ;; Clear any remaining bytes (optional but good practice)
-  (when (< new-len old-len)
-    (for ([i (in-range (add1 new-len) (add1 old-len))])
-      (ptr-set! (ptr-add ptr i) _byte 0))))
+  (ptr-set! (ptr-add raw-ptr (+ header-size new-len)) _byte 0))
 
 ;; ======== C Struct Field Setter Function ========
 ;; Set a field value in a C struct

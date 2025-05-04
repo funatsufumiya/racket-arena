@@ -22,6 +22,20 @@
 (printf "Greeting: ~a\n" (greeting))  ;; Normal usage
 (printf "Raw pointer: ~a\n" (greeting 'ptr))  ;; Get pointer when needed
 
+;; String with capacity example
+(define expandable-text (arena-string my-arena "Short text" 100))  ;; 100 chars capacity
+(printf "Initial text: ~a (length: ~a, capacity: ~a)\n" 
+        (expandable-text) 
+        (expandable-text 'length) 
+        (expandable-text 'capacity))
+
+;; Update with a longer string (within capacity)
+(set-arena-string! expandable-text "This is a longer text that fits within our capacity")
+(printf "Updated text: ~a (new length: ~a, same capacity: ~a)\n" 
+        (expandable-text) 
+        (expandable-text 'length) 
+        (expandable-text 'capacity))
+
 ;; ======== Array Examples ========
 ;; Integer array example
 ;; Integer array example with capacity
@@ -62,6 +76,54 @@
 ;; Clear the array
 (arena-array-clear! squares)
 (printf "After clear, size: ~a\n" (arena-array-size squares))
+
+;; ======== String Array Examples ========
+;; Create a string array with default capacities
+(define names (arena-string-array my-arena '("Alice" "Bob" "Charlie")))
+(printf "\nNames array (size: ~a, capacity: ~a, string-capacity: ~a):\n" 
+        (names 'size) (names 'capacity) (names 'string-capacity))
+
+;; Access individual strings
+(for ([i (in-range (names 'size))])
+  (define name-fn (names i))
+  (printf "  Name ~a: ~a (length: ~a)\n" 
+          i (name-fn) (name-fn 'length)))
+
+;; Create a string array with custom capacity and string-capacity
+(define descriptions (arena-string-array 
+                      my-arena 
+                      '("Short desc" "Another") 
+                      10    ;; Array capacity: can hold up to 10 strings
+                      100)) ;; String capacity: each string can be up to 100 chars
+
+(printf "\nDescriptions array (size: ~a, capacity: ~a, string-capacity: ~a):\n" 
+        (descriptions 'size) (descriptions 'capacity) (descriptions 'string-capacity))
+
+;; Update a string
+(set-arena-string-array! descriptions 0 "This is a much longer description")
+(printf "Updated description: ~a\n" ((descriptions 0)))
+
+;; Push a new string
+(arena-string-array-push! descriptions "Third description added via push")
+(printf "\nAfter push (size: ~a):\n" (descriptions 'size))
+(for ([i (in-range (descriptions 'size))])
+  (printf "  Description ~a: ~a\n" i ((descriptions i))))
+
+;; Pop the last string
+(define popped-string (arena-string-array-pop! descriptions))
+(printf "\nPopped string: ~a\n" popped-string)
+(printf "After pop (size: ~a):\n" (descriptions 'size))
+(for ([i (in-range (descriptions 'size))])
+  (printf "  Description ~a: ~a\n" i ((descriptions i))))
+
+;; Clear the array
+(arena-string-array-clear! descriptions)
+(printf "\nAfter clear (size: ~a, capacity still: ~a)\n" 
+        (descriptions 'size) (descriptions 'capacity))
+
+;; Add new string after clearing
+(arena-string-array-push! descriptions "Fresh start after clearing")
+(printf "Added new string after clearing: ~a\n" ((descriptions 0)))
 
 ;; ======== C Struct Examples ========
 ;; Define a C struct type for a 2D point
@@ -178,6 +240,35 @@
 (printf "Original message: ~a\n" (message))
 (set-arena-string! message "Hi there!")  ;; Same length
 (printf "Updated message: ~a\n" (message))
+
+;; String updates with capacity
+(define flexible-text (arena-string update-arena "Initial" 20))
+(printf "Original flexible text: ~a (length: ~a, capacity: ~a)\n" 
+        (flexible-text) 
+        (flexible-text 'length) 
+        (flexible-text 'capacity))
+
+;; Update with longer text (within capacity)
+(set-arena-string! flexible-text "Longer content now")
+(printf "Updated flexible text: ~a (new length: ~a, same capacity: ~a)\n" 
+        (flexible-text) 
+        (flexible-text 'length) 
+        (flexible-text 'capacity))
+
+;; String array updates
+(define titles (arena-string-array update-arena 
+                                   '("First title" "Second") 
+                                   10  ;; capacity 
+                                   100)) ;; string-capacity
+(printf "\nOriginal titles:\n")
+(for ([i (in-range (titles 'size))])
+  (printf "  Title ~a: ~a\n" i ((titles i))))
+
+;; Update a title
+(set-arena-string-array! titles 1 "Updated second title with more text")
+(printf "\nAfter title update:\n")
+(for ([i (in-range (titles 'size))])
+  (printf "  Title ~a: ~a\n" i ((titles i))))
 
 ;; Struct field updates
 (define-cstruct _staff_record ([id _int]

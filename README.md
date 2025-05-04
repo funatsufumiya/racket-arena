@@ -38,6 +38,7 @@ see [docs/api.md](docs/api.md)
   - This is same for array (complexed array).
 - We don't have hash table API yet ([Issue #5](https://github.com/funatsufumiya/racket-arena/issues/5)).
   - We may provide implementation for the most simple case of this, but in the future.
+  - You probably can simulate simple hash table with array (using array of pairs, or pair of array).
 
 ## Acknowledgment
 

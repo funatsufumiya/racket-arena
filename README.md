@@ -24,3 +24,7 @@ $ make check
 $ make performance-check
 # or: racket examples/performance-check.rkt
 ```
+
+## TODOs
+
+- dynamic array (with capacity)

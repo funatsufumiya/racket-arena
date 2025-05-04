@@ -14,7 +14,7 @@ see [examples/high-layer.rkt](https://github.com/funatsufumiya/racket-arena/blob
 
 # === Install package using raco
 $ make install
-# or: raco pkg install --deps search-auto --name arena --link $(REPOSITORY_PATH)
+# or: raco pkg install --deps search-auto --name arena --link .
 
 # === Run examples for check
 $ make check

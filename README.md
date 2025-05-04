@@ -2,6 +2,8 @@
 
 Arena allocation (memory segment) for Racket.
 
+This maybe useful to avoid specific kind of GC (memory usage) problem.
+
 ## Example
 
 see [examples/high-layer.rkt](examples/high-layer.rkt)

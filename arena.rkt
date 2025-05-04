@@ -166,17 +166,34 @@
 
 ;; ======== Array Operations Macro ========
 ;; Macro to generate array allocators for various types
+;; ======== Array Operations with Dynamic Sizing ========
+;; Array structure with capacity and size information
+;; ======== Array Operations with Dynamic Sizing ========
+;; Array structure with capacity and size information
 (define-syntax (define-arena-array stx)
   (syntax-case stx ()
     [(_ name type-expr)
      (with-syntax ([arena-name (format-id stx "arena-~a-array" #'name)])
        #'(begin
-           (define (arena-name arena values)
+           (define (arena-name arena values [capacity (length values)])
              (define type type-expr)
              (define len (length values))
              (define type-size (ctype-sizeof type))
-             (define bytes (* len type-size))
-             (define ptr (arena bytes))
+             
+             ;; Ensure capacity is at least the size of initial values
+             (when (< capacity len)
+               (error 'arena-name "capacity (~a) must be >= length of values (~a)" capacity len))
+             
+             ;; Calculate memory layout: [capacity(8 bytes)][size(8 bytes)][data...]
+             (define header-size 16)  ;; 8 bytes for capacity + 8 bytes for current size
+             (define data-size (* capacity type-size))
+             (define total-size (+ header-size data-size))
+             
+             (define ptr (arena total-size))
+             
+             ;; Initialize header values - CRITICAL FIX HERE
+             (ptr-set! ptr _uint64 capacity)            ;; Store maximum capacity
+             (ptr-set! (ptr-add ptr 8) _uint64 len)     ;; Store current size
              
              ;; Copy values with appropriate conversion
              (for ([i (in-range len)]
@@ -186,23 +203,122 @@
                   [(and (number? v) (eq? type _double)) (exact->inexact v)]
                   [(and (number? v) (eq? type _float)) (exact->inexact v)]
                   [else v]))
-               (ptr-set! (ptr-add ptr (* i type-size)) type actual-value))
+               (ptr-set! (ptr-add ptr (+ header-size (* i type-size))) type actual-value))
              
              ;; Return a multi-dispatch function
-             (case-lambda
-               [(idx) (cond
-                        [(number? idx) 
-                         (if (< idx len)
-                             (ptr-ref (ptr-add ptr (* idx type-size)) type)
-                             (error 'arena-name "index out of bounds: ~a" idx))]
-                        [(eq? idx 'ptr) ptr]
-                        [(eq? idx 'arena) arena]
-                        [(eq? idx 'len) len]
-                        [else (error "Invalid argument to array function")])]
-               [() (if (= len 1)
-                      (ptr-ref ptr type 0)
-                      (error "Array has multiple elements, index required"))]))
+             (lambda args
+               (cond
+                [(null? args)
+                 (if (= len 1)
+                     (ptr-ref (ptr-add ptr (+ header-size 0)) type)
+                     (error "Array has multiple elements, index or operation required"))]
+                [(= (length args) 1)
+                 (let ([arg (car args)])
+                   (cond
+                     [(number? arg)
+                      (define current-size (ptr-ref (ptr-add ptr 8) _uint64))
+                      (if (< arg current-size)
+                          (ptr-ref (ptr-add ptr (+ header-size (* arg type-size))) type)
+                          (error 'arena-name "index out of bounds: ~a (size: ~a)" arg current-size))]
+                     [(eq? arg 'ptr) ptr]
+                     [(eq? arg 'arena) arena]
+                     [(eq? arg 'type) type]
+                     [(eq? arg 'element-size) type-size]
+                     [(eq? arg 'len) (ptr-ref (ptr-add ptr 8) _uint64)]
+                     [(eq? arg 'size) (ptr-ref (ptr-add ptr 8) _uint64)]
+                     [(eq? arg 'capacity) (ptr-ref ptr _uint64)]
+                     [else (error "Invalid argument to array function")]))]
+                [else (error "Too many arguments provided to array function")])))
            (provide arena-name)))]))
+
+;; Array push operation: add element to end of array
+;; Returns #t if successful, #f if array is at capacity
+(define (arena-array-push! array-fn value)
+  (define ptr (array-fn 'ptr))
+  (define type (array-fn 'type))
+  (define element-size (array-fn 'element-size))
+  (define current-size (array-fn 'size))
+  (define capacity (array-fn 'capacity))
+  
+  ;; Check if array is full
+  (if (>= current-size capacity)
+      #f  ;; Return false if full
+      (let ()  ;; Use let instead of begin+define
+        ;; Convert value if necessary
+        (define actual-value
+          (cond
+           [(and (number? value) (eq? type _double)) (exact->inexact value)]
+           [(and (number? value) (eq? type _float)) (exact->inexact value)]
+           [else value]))
+        
+        ;; Add element at the end
+        (define header-size 16)
+        (ptr-set! (ptr-add ptr (+ header-size (* current-size element-size))) type actual-value)
+        
+        ;; Update size
+        (ptr-set! (ptr-add ptr 8) _uint64 (add1 current-size))
+        
+        ;; Return success
+        #t)))
+
+;; Array pop operation: remove and return last element
+;; Returns the element if successful, #f if array is empty
+(define (arena-array-pop! array-fn)
+  (define ptr (array-fn 'ptr))
+  (define type (array-fn 'type))
+  (define element-size (array-fn 'element-size))
+  (define current-size (array-fn 'size))
+  
+  ;; Check if array is empty
+  (if (= current-size 0)
+      #f  ;; Return false if empty
+      (let ()  ;; Use let instead of begin+define
+        ;; Get the last element
+        (define header-size 16)
+        (define last-index (sub1 current-size))
+        (define last-element 
+          (ptr-ref (ptr-add ptr (+ header-size (* last-index element-size))) type))
+        
+        ;; Update size
+        (ptr-set! (ptr-add ptr 8) _uint64 last-index)
+        
+        ;; Return the removed element
+        last-element)))
+
+;; Clear array (reset to empty)
+;; Returns void as clearing should always succeed
+(define (arena-array-clear! array-fn)
+  (define ptr (array-fn 'ptr))
+  
+  ;; Reset size to 0 (capacity remains the same)
+  (ptr-set! (ptr-add ptr 8) _uint64 0)
+  
+  ;; Return void
+  (void))
+
+;; Get array as list
+(define (arena-array->list array-fn)
+  (define current-size (array-fn 'size))
+  
+  ;; Build list from array elements
+  (for/list ([i (in-range current-size)])
+    (array-fn i)))
+
+;; Size getter - convenience function
+(define (arena-array-size array-fn)
+  (array-fn 'size))
+
+;; Capacity getter - convenience function
+(define (arena-array-capacity array-fn)
+  (array-fn 'capacity))
+
+;; Export array functions
+(provide arena-array-push!
+         arena-array-pop!
+         arena-array-clear!
+         arena-array->list
+         arena-array-size
+         arena-array-capacity)
 
 ;; Macro to automatically define all primitive type functions
 (define-syntax (define-all-primitives stx)
@@ -387,39 +503,6 @@
              [else (error "Invalid argument to struct array function")])]
     [() (error "Index required to access struct in array")]))
 
-;; ======== Collection Operations ========
-;; Implement arena-based vector (for racket-style vectors)
-(define (arena-vector arena elems)
-  (define len (length elems))
-  (define ptr-size (ctype-sizeof _pointer))
-  (define bytes (* (+ len 1) ptr-size))  ;; Space for length + data
-  (define ptr (arena bytes))
-  
-  ;; Set length
-  (ptr-set! ptr _int len 0)
-  
-  ;; Copy elements (simplified to support strings only)
-  (for ([i (in-range len)]
-        [elem (in-list elems)])
-    (define str-fn (arena-string arena elem))
-    (ptr-set! (ptr-add ptr (+ ptr-size (* i ptr-size))) _pointer 
-              (str-fn 'ptr)))
-  
-  ;; Return a multi-dispatch function
-  (case-lambda
-    [(idx) (cond
-             [(number? idx)                             ;; Normal usage - get element at index
-              (if (< idx len)
-                  (arena-string-ref 
-                   (ptr-ref (ptr-add ptr (+ ptr-size (* idx ptr-size))) _pointer))
-                  (error 'arena-vector "index out of bounds: ~a" idx))]
-             [(eq? idx 'ptr) ptr]                       ;; Get pointer with 'ptr symbol
-             [(eq? idx 'len) len]                       ;; Get length with 'len symbol
-             [else (error "Invalid argument to vector function")])]
-    [() (if (= len 1)                                  ;; No arguments - get first element if singleton
-            (arena-string-ref (ptr-ref (ptr-add ptr ptr-size) _pointer))
-            (error "Vector has multiple elements, index required"))]))
-
 ;; ======== Setter Functions for Primitive Types ========
 ;; Macro to generate primitive type setters
 (define-syntax (define-primitive-setter stx)
@@ -461,13 +544,13 @@
        #'(begin
            (define (setter-name array-fn index new-value)
              (define type type-expr)
-             (define len (array-fn 'len))
-             (define type-size (ctype-sizeof type))
+             (define current-size (array-fn 'size))
+             (define type-size (array-fn 'element-size))
              (define ptr (array-fn 'ptr))
              
              ;; Check bounds
-             (unless (< index len)
-               (error 'setter-name "index out of bounds: ~a" index))
+             (unless (< index current-size)
+               (error 'setter-name "index out of bounds: ~a (size: ~a)" index current-size))
              
              ;; Convert value if necessary
              (define actual-value
@@ -477,7 +560,8 @@
                 [else new-value]))
              
              ;; Set the value
-             (ptr-set! (ptr-add ptr (* index type-size)) type actual-value))
+             (define header-size 16)
+             (ptr-set! (ptr-add ptr (+ header-size (* index type-size))) type actual-value))
            (provide setter-name)))]))
 
 ;; Macro to automatically define all array setters
@@ -551,48 +635,10 @@
   (define struct-fn (struct-array-fn struct-index))
   (set-arena-struct-field! struct-fn field-index new-value))
 
-;; ======== Vector Element Setter Function ========
-;; This is more complex as we need to handle string allocation
-;; Currently only supporting string replacement with same or shorter length
-(define (set-arena-vector-element! vector-fn index new-string)
-  (define ptr (vector-fn 'ptr))
-  (define len (vector-fn 'len))
-  (define ptr-size (ctype-sizeof _pointer))
-  
-  ;; Check bounds
-  (unless (< index len)
-    (error 'set-arena-vector-element! "index out of bounds: ~a" index))
-  
-  ;; Get the current string pointer
-  (define elem-ptr (ptr-ref (ptr-add ptr (+ ptr-size (* index ptr-size))) _pointer))
-  (define old-string (cast elem-ptr _pointer _string/utf-8))
-  (define old-len (string-length old-string))
-  (define new-len (string-length new-string))
-  
-  ;; Check if new string fits
-  (when (> new-len old-len)
-    (error 'set-arena-vector-element! 
-           "new string (~a chars) is longer than allocated space (~a chars)" 
-           new-len old-len))
-  
-  ;; Copy new string data
-  (for ([i (in-range new-len)]
-        [c (in-string new-string)])
-    (ptr-set! (ptr-add elem-ptr i) _byte (char->integer c)))
-  
-  ;; Add NULL terminator
-  (ptr-set! (ptr-add elem-ptr new-len) _byte 0)
-  
-  ;; Clear any remaining bytes
-  (when (< new-len old-len)
-    (for ([i (in-range (add1 new-len) (add1 old-len))])
-      (ptr-set! (ptr-add elem-ptr i) _byte 0))))
-
 ;; Export the newly added setter functions
 (provide set-arena-string!
          set-arena-struct-field!
-         set-arena-struct-array-field!
-         set-arena-vector-element!)
+         set-arena-struct-array-field!)
 
 ;; ======== Scope Management ========
 ;; Scoped arena operations
@@ -618,5 +664,4 @@
          arena-string-ref
          arena-cstruct
          arena-cstruct-array
-         arena-vector
          with-arena)

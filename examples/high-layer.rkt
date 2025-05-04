@@ -24,29 +24,44 @@
 
 ;; ======== Array Examples ========
 ;; Integer array example
-(define squares (arena-int-array my-arena '(0 1 4 9 16 25 36 49 64 81)))
+;; Integer array example with capacity
+(define squares (arena-int-array my-arena '(0 1 4 9 16 25) 10))
 (printf "Squares length: ~a\n" (squares 'len))  ;; Get length
+(printf "Squares capacity: ~a\n" (squares 'capacity))  ;; Get capacity
 
 (printf "Squares: ")
 (for ([i (in-range (squares 'len))])
   (printf "~a " (squares i)))  ;; Access elements by index
 (printf "\n")
 
-;; Double array example
-(define temperatures (arena-double-array my-arena '(98.6 37.0 22.5 -5.0)))
-(printf "Temperatures: ")
-(for ([i (in-range (temperatures 'len))])
-  (printf "~a " (temperatures i)))
+;; Using the dynamic functionality
+(printf "Adding new elements: ")
+(if (arena-array-push! squares 36)
+    (printf "Added 36. ")
+    (printf "Failed to add 36. "))
+(if (arena-array-push! squares 49)
+    (printf "Added 49.\n")
+    (printf "Failed to add 49.\n"))
+(printf "New size: ~a\n" (arena-array-size squares))
+
+(printf "Updated squares: ")
+(for ([i (in-range (squares 'len))])
+  (printf "~a " (squares i)))
 (printf "\n")
 
-;; ======== Vector Example ========
-(define fruits (arena-vector my-arena '("apple" "banana" "cherry" "date" "elderberry")))
-(printf "Number of fruits: ~a\n" (fruits 'len))
+;; Popping elements
+(define last-elem (arena-array-pop! squares))
+(if last-elem
+    (printf "Popped: ~a, New size: ~a\n" last-elem (arena-array-size squares))
+    (printf "Failed to pop: array is empty\n"))
 
-(printf "Fruits: ")
-(for ([i (in-range (fruits 'len))])
-  (printf "~a " (fruits i)))
-(printf "\n")
+;; Convert to list
+(define squares-list (arena-array->list squares))
+(printf "As list: ~a\n" squares-list)
+
+;; Clear the array
+(arena-array-clear! squares)
+(printf "After clear, size: ~a\n" (arena-array-size squares))
 
 ;; ======== C Struct Examples ========
 ;; Define a C struct type for a 2D point
@@ -143,21 +158,6 @@
   (define member (team i))
   (printf "  Staff member ~a: ID=~a, Salary=~a\n" 
           i (member 0) (member 1)))
-
-;; Vector element updates
-(define cities (arena-vector update-arena 
-                           '("Tokyo" "Paris" "London" "New York")))
-
-(printf "Original cities: ")
-(for ([i (in-range (cities 'len))])
-  (printf "~a " (cities i)))
-(printf "\n")
-
-(set-arena-vector-element! cities 2 "Berlin")  ;; Replace London with Berlin
-(printf "Updated cities: ")
-(for ([i (in-range (cities 'len))])
-  (printf "~a " (cities i)))
-(printf "\n")
 
 ;; Cleanup
 (destroy-arena update-arena)

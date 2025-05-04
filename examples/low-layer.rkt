@@ -11,6 +11,7 @@
 ;; allocate string with length 10
 (define str-len 10)
 (define str-ptr (my-arena str-len))
+;; ** note (my-arena str-len) is short-hand for (allocate-in-arena my-arena str-len)
 
 ;; write string data
 (for ([i (in-range str-len)])

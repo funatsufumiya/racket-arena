@@ -74,6 +74,8 @@
 ;; ======== Low-level API ========
 ;; Low-level API still available when needed
 (define raw-ptr (my-arena 20))
+;; ** note (my-arena 20) is short-hand for (allocate-in-arena my-arena 20)
+
 (for ([i (in-range 10)])
   (ptr-set! (ptr-add raw-ptr i) _byte (+ 48 i)))  ;; ASCII digits 0-9
 (ptr-set! (ptr-add raw-ptr 10) _byte 0)  ;; NULL terminator

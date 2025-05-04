@@ -6,6 +6,8 @@
 ;; Create a 10MB arena
 (define my-arena (make-arena (* 10 1024 1024)))
 
+(printf "=== High-level API example ===\n")
+
 ;; ======== Primitive Values ========
 ;; Individual primitive values
 (define age (arena-int my-arena 42))
@@ -71,6 +73,92 @@
   (printf "  Point ~a: (~a, ~a)\n" 
           i (point 0) (point 1)))
 
+;; ======== Update Value Examples ========
+(printf "\n=== Value modification examples ===\n")
+
+;; Create a new arena for our examples
+(define update-arena (make-arena (* 1 1024 1024)))
+
+;; Primitive value updates
+(define score (arena-int update-arena 75))
+(printf "Original score: ~a\n" (score))
+(set-arena-int! score 95)
+(printf "Updated score: ~a\n" (score))
+
+;; Array element updates
+(define data (arena-double-array update-arena '(1.1 2.2 3.3 4.4)))
+(printf "Original array: ")
+(for ([i (in-range (data 'len))])
+  (printf "~a " (data i)))
+(printf "\n")
+
+(set-arena-double-array! data 1 2.5)
+(set-arena-double-array! data 3 4.9)
+(printf "Updated array: ")
+(for ([i (in-range (data 'len))])
+  (printf "~a " (data i)))
+(printf "\n")
+
+;; String updates
+(define message (arena-string update-arena "Hello world"))
+(printf "Original message: ~a\n" (message))
+(set-arena-string! message "Hi there!")  ;; Same length
+(printf "Updated message: ~a\n" (message))
+
+;; Struct field updates
+(define-cstruct _staff_record ([id _int]
+                          [salary _double]))
+
+(define staff1 (arena-cstruct update-arena _staff_record 
+                               (list _int _double) 
+                               (list 101 50000.0)))
+
+(printf "Original staff record: ID=~a, Salary=~a\n" 
+        (staff1 0) (staff1 1))
+
+(set-arena-struct-field! staff1 1 55000.0)  ;; Give a raise
+(printf "After raise: ID=~a, Salary=~a\n" 
+        (staff1 0) (staff1 1))
+
+;; Struct array updates
+(define team (arena-cstruct-array update-arena _staff_record 
+                                 (list _int _double) 3
+                                 (lambda (i) 
+                                   (list (+ 201 i) (* (+ i 1) 40000.0)))))
+
+(printf "Original team:\n")
+(for ([i (in-range (team 'len))])
+  (define member (team i))
+  (printf "  Staff member ~a: ID=~a, Salary=~a\n" 
+          i (member 0) (member 1)))
+
+;; Update second staff member's salary
+(set-arena-struct-array-field! team 1 1 85000.0)
+
+(printf "After team update:\n")
+(for ([i (in-range (team 'len))])
+  (define member (team i))
+  (printf "  Staff member ~a: ID=~a, Salary=~a\n" 
+          i (member 0) (member 1)))
+
+;; Vector element updates
+(define cities (arena-vector update-arena 
+                           '("Tokyo" "Paris" "London" "New York")))
+
+(printf "Original cities: ")
+(for ([i (in-range (cities 'len))])
+  (printf "~a " (cities i)))
+(printf "\n")
+
+(set-arena-vector-element! cities 2 "Berlin")  ;; Replace London with Berlin
+(printf "Updated cities: ")
+(for ([i (in-range (cities 'len))])
+  (printf "~a " (cities i)))
+(printf "\n")
+
+(printf "\n")
+(printf "=== Low-level API example ===\n")
+
 ;; ======== Low-level API ========
 ;; Low-level API still available when needed
 (define raw-ptr (my-arena 20))
@@ -87,7 +175,7 @@
 (destroy-arena my-arena)
 
 ;; ======== With-Arena Example ========
-(printf "\nWith-arena scope example:\n")
+(printf "\n=== With-arena scope example ===\n")
 (with-arena temp-arena (* 1 1024 1024)
   (define temp-message (arena-string temp-arena "This message is in a scoped arena"))
   (printf "Scoped message: ~a\n" (temp-message))

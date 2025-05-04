@@ -367,6 +367,180 @@
             (arena-string-ref (ptr-ref (ptr-add ptr ptr-size) _pointer))
             (error "Vector has multiple elements, index required"))]))
 
+;; ======== Setter Functions for Primitive Types ========
+;; Macro to generate primitive type setters
+(define-syntax (define-primitive-setter stx)
+  (syntax-case stx ()
+    [(_ name type-expr)
+     (with-syntax ([setter-name (format-id stx "set-arena-~a!" #'name)])
+       #'(begin
+           (define (setter-name value-fn new-value)
+             (define type type-expr)
+             ;; Handle numeric conversions if needed
+             (define actual-value
+               (cond
+                [(and (number? new-value) (eq? type _double)) (exact->inexact new-value)]
+                [(and (number? new-value) (eq? type _float)) (exact->inexact new-value)]
+                [else new-value]))
+             (ptr-set! (value-fn 'ptr) type actual-value))
+           (provide setter-name)))]))
+
+;; Macro to automatically define all primitive setters
+(define-syntax (define-all-primitive-setters stx)
+  (syntax-case stx ()
+    [(_)
+     (with-syntax ([(definition ...)
+                   (for/list ([p (in-list primitive-types)])
+                     (with-syntax ([name (datum->syntax stx (first p))]
+                                   [type (datum->syntax stx (second p))])
+                       #'(define-primitive-setter name type)))])
+       #'(begin definition ...))]))
+
+;; Generate all primitive setter functions
+(define-all-primitive-setters)
+
+;; ======== Setter Functions for Arrays ========
+;; Macro to generate array setters
+(define-syntax (define-array-setter stx)
+  (syntax-case stx ()
+    [(_ name type-expr)
+     (with-syntax ([setter-name (format-id stx "set-arena-~a-array!" #'name)])
+       #'(begin
+           (define (setter-name array-fn index new-value)
+             (define type type-expr)
+             (define len (array-fn 'len))
+             (define type-size (ctype-sizeof type))
+             (define ptr (array-fn 'ptr))
+             
+             ;; Check bounds
+             (unless (< index len)
+               (error 'setter-name "index out of bounds: ~a" index))
+             
+             ;; Convert value if necessary
+             (define actual-value
+               (cond
+                [(and (number? new-value) (eq? type _double)) (exact->inexact new-value)]
+                [(and (number? new-value) (eq? type _float)) (exact->inexact new-value)]
+                [else new-value]))
+             
+             ;; Set the value
+             (ptr-set! (ptr-add ptr (* index type-size)) type actual-value))
+           (provide setter-name)))]))
+
+;; Macro to automatically define all array setters
+(define-syntax (define-all-array-setters stx)
+  (syntax-case stx ()
+    [(_)
+     (with-syntax ([(definition ...)
+                   (for/list ([p (in-list primitive-types)])
+                     (with-syntax ([name (datum->syntax stx (first p))]
+                                   [type (datum->syntax stx (second p))])
+                       #'(define-array-setter name type)))])
+       #'(begin definition ...))]))
+
+;; Generate all array setter functions
+(define-all-array-setters)
+
+;; ======== String Setter Function ========
+;; Set a new string value
+(define (set-arena-string! str-fn new-string)
+  (define ptr (str-fn 'ptr))
+  (define old-string (str-fn))
+  (define old-len (string-length old-string))
+  (define new-len (string-length new-string))
+  
+  ;; Check if new string fits in the allocated memory
+  ;; (allowing for NULL terminator)
+  (when (> (+ new-len 1) (+ old-len 1))
+    (error 'set-arena-string! 
+           "new string (~a chars) is longer than allocated space (~a chars)" 
+           new-len old-len))
+  
+  ;; Copy new string data
+  (for ([i (in-range new-len)]
+        [c (in-string new-string)])
+    (ptr-set! (ptr-add ptr i) _byte (char->integer c)))
+  
+  ;; Add NULL terminator
+  (ptr-set! (ptr-add ptr new-len) _byte 0)
+  
+  ;; Clear any remaining bytes (optional but good practice)
+  (when (< new-len old-len)
+    (for ([i (in-range (add1 new-len) (add1 old-len))])
+      (ptr-set! (ptr-add ptr i) _byte 0))))
+
+;; ======== C Struct Field Setter Function ========
+;; Set a field value in a C struct
+(define (set-arena-struct-field! struct-fn field-index new-value)
+  (define ptr (struct-fn 'ptr))
+  (define field-types (struct-fn 'field-types))
+  (define field-offsets (struct-fn 'field-offsets))
+  
+  ;; Check bounds
+  (unless (< field-index (length field-types))
+    (error 'set-arena-struct-field! "field index out of bounds: ~a" field-index))
+  
+  (define field-type (list-ref field-types field-index))
+  (define offset (list-ref field-offsets field-index))
+  
+  ;; Convert value if necessary
+  (define actual-value
+    (cond
+      [(and (number? new-value) (eq? field-type _double)) (exact->inexact new-value)]
+      [(and (number? new-value) (eq? field-type _float)) (exact->inexact new-value)]
+      [else new-value]))
+  
+  ;; Set the field value
+  (ptr-set! (ptr-add ptr offset) field-type actual-value))
+
+;; Set a field value in a struct within an array
+(define (set-arena-struct-array-field! struct-array-fn struct-index field-index new-value)
+  (define struct-fn (struct-array-fn struct-index))
+  (set-arena-struct-field! struct-fn field-index new-value))
+
+;; ======== Vector Element Setter Function ========
+;; This is more complex as we need to handle string allocation
+;; Currently only supporting string replacement with same or shorter length
+(define (set-arena-vector-element! vector-fn index new-string)
+  (define ptr (vector-fn 'ptr))
+  (define len (vector-fn 'len))
+  (define ptr-size (ctype-sizeof _pointer))
+  
+  ;; Check bounds
+  (unless (< index len)
+    (error 'set-arena-vector-element! "index out of bounds: ~a" index))
+  
+  ;; Get the current string pointer
+  (define elem-ptr (ptr-ref (ptr-add ptr (+ ptr-size (* index ptr-size))) _pointer))
+  (define old-string (cast elem-ptr _pointer _string/utf-8))
+  (define old-len (string-length old-string))
+  (define new-len (string-length new-string))
+  
+  ;; Check if new string fits
+  (when (> new-len old-len)
+    (error 'set-arena-vector-element! 
+           "new string (~a chars) is longer than allocated space (~a chars)" 
+           new-len old-len))
+  
+  ;; Copy new string data
+  (for ([i (in-range new-len)]
+        [c (in-string new-string)])
+    (ptr-set! (ptr-add elem-ptr i) _byte (char->integer c)))
+  
+  ;; Add NULL terminator
+  (ptr-set! (ptr-add elem-ptr new-len) _byte 0)
+  
+  ;; Clear any remaining bytes
+  (when (< new-len old-len)
+    (for ([i (in-range (add1 new-len) (add1 old-len))])
+      (ptr-set! (ptr-add elem-ptr i) _byte 0))))
+
+;; Export the newly added setter functions
+(provide set-arena-string!
+         set-arena-struct-field!
+         set-arena-struct-array-field!
+         set-arena-vector-element!)
+
 ;; ======== Scope Management ========
 ;; Scoped arena operations
 (define-syntax-rule (with-arena arena-name size body ...)

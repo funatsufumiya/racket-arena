@@ -6,7 +6,6 @@ all: build
 
 build:
 	cd src/rust && cargo build --release
-	mkdir -p native
 	cp src/rust/target/release/*arena.* native/
 	rm -f native/*.d native/*.exp native/*.lib native/*.pdb
 

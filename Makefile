@@ -25,6 +25,8 @@ install: all
 uninstall:
 	raco pkg remove $(PACKAGE_NAME)
 
+reinstall: uninstall install
+
 setup: install
 	raco setup $(PACKAGE_NAME)
 

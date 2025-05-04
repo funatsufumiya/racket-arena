@@ -6,8 +6,9 @@ all: build
 
 build:
 	cd src/rust && cargo build --release
-	cp src/rust/target/release/libarena.* native/
-	rm -f native/libarena.d
+	mkdir -p native
+	cp src/rust/target/release/*arena.* native/
+	rm -f native/*.d native/*.exp native/*.lib native/*.pdb
 
 check: all
 	racket examples/low-layer.rkt

@@ -415,3 +415,5 @@
   (printf "Scoped message: ~a\n" (temp-message))
   ;; Arena is automatically destroyed when scope exits
 )
+
+(printf "\n\n")

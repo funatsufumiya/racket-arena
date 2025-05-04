@@ -27,10 +27,10 @@ $ make performance-check
 # or: racket examples/performance-check.rkt
 ```
 
-## Acknowledgment
-
-This project was developed with the assistance of coding-assistant AI (Cody).
-
 ## API Documentation
 
 see [docs/api.md](docs/api.md)
+
+## Acknowledgment
+
+This project was developed with the assistance of coding-assistant AI (Cody).

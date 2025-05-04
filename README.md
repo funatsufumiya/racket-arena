@@ -1,6 +1,6 @@
 # racket-arena
 
-arena allocation (memory segment) for Racket.
+Arena allocation (memory segment) for Racket.
 
 # test (install)
 

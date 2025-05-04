@@ -73,6 +73,9 @@
   (printf "  Point ~a: (~a, ~a)\n" 
           i (point 0) (point 1)))
 
+;; Cleanup
+(destroy-arena my-arena)
+
 ;; ======== Update Value Examples ========
 (printf "\n=== Value modification examples ===\n")
 
@@ -160,12 +163,93 @@
 (destroy-arena update-arena)
 
 (printf "\n")
-(printf "=== Low-level API example ===\n")
+
+;; ======== Deallocation Example ========
+(printf "\n=== Deallocation example ===\n")
+
+;; Create a new arena for our deallocation examples
+(define dealloc-arena (make-arena (* 1 1024 1024)))
+
+;; Get initial stats to see the arena state
+(define initial-stats (arena-get-stats dealloc-arena))
+(printf "Initial arena stats: Total=~a, Used=~a, Free=~a, Blocks=~a\n"
+        (hash-ref initial-stats 'total)
+        (hash-ref initial-stats 'used)
+        (hash-ref initial-stats 'free)
+        (hash-ref initial-stats 'block-count))
+
+;; Allocate various types of data in the arena
+(printf "\nAllocating various data types...\n")
+(define d-int (arena-int dealloc-arena 123))
+(define d-double (arena-double dealloc-arena 3.14159))
+(define d-string (arena-string dealloc-arena "This is a test string for deallocation"))
+(define d-array (arena-int-array dealloc-arena '(10 20 30 40 50)))
+
+;; Define a simple struct for the example
+(define-cstruct _test_record ([id _int]
+                           [value _double]))
+
+(define d-struct (arena-cstruct dealloc-arena _test_record 
+                              (list _int _double) 
+                              (list 42 99.9)))
+
+;; Check stats after allocation
+(define after-alloc-stats (arena-get-stats dealloc-arena))
+(printf "After allocation stats: Total=~a, Used=~a, Free=~a, Blocks=~a\n"
+        (hash-ref after-alloc-stats 'total)
+        (hash-ref after-alloc-stats 'used)
+        (hash-ref after-alloc-stats 'free)
+        (hash-ref after-alloc-stats 'block-count))
+
+;; Use the allocated data
+(printf "\nAllocated values:\n")
+(printf "  Integer: ~a\n" (d-int))
+(printf "  Double: ~a\n" (d-double))
+(printf "  String: ~a\n" (d-string))
+(printf "  Array: ~a ~a ~a...\n" (d-array 0) (d-array 1) (d-array 2))
+(printf "  Struct: id=~a, value=~a\n" (d-struct 0) (d-struct 1))
+
+;; Deallocate some values individually
+(printf "\nDeallocating some values individually...\n")
+(deallocate-arena-value d-int)
+(printf "Deallocated integer\n")
+(deallocate-arena-value d-string)
+(printf "Deallocated string\n")
+
+;; Check stats after some deallocation
+(define after-dealloc-stats (arena-get-stats dealloc-arena))
+(printf "\nAfter partial deallocation stats: Total=~a, Used=~a, Free=~a, Blocks=~a\n"
+        (hash-ref after-dealloc-stats 'total)
+        (hash-ref after-dealloc-stats 'used)
+        (hash-ref after-dealloc-stats 'free)
+        (hash-ref after-dealloc-stats 'block-count))
+
+;; Try to allocate new data after deallocating some
+(printf "\nAllocating new data after deallocation...\n")
+(define d-new-int (arena-int dealloc-arena 456))
+(define d-new-string (arena-string dealloc-arena "New string after deallocation"))
+
+;; Use the newly allocated data
+(printf "New integer: ~a\n" (d-new-int))
+(printf "New string: ~a\n" (d-new-string))
+
+;; Final stats
+(define final-stats (arena-get-stats dealloc-arena))
+(printf "\nFinal arena stats: Total=~a, Used=~a, Free=~a, Blocks=~a\n"
+        (hash-ref final-stats 'total)
+        (hash-ref final-stats 'used)
+        (hash-ref final-stats 'free)
+        (hash-ref final-stats 'block-count))
+
+;; Cleanup
+(destroy-arena dealloc-arena)
 
 ;; ======== Low-level API ========
-;; Low-level API still available when needed
-(define raw-ptr (my-arena 20))
-;; ** note (my-arena 20) is short-hand for (allocate-in-arena my-arena 20)
+(printf "\n=== Low-level API example ===\n")
+
+(define ll-arena (make-arena (* 1 1024 1024)))
+(define raw-ptr (ll-arena 20))
+;; ** note (ll-arena 20) is short-hand for (allocate-in-arena ll-arena 20)
 
 (for ([i (in-range 10)])
   (ptr-set! (ptr-add raw-ptr i) _byte (+ 48 i)))  ;; ASCII digits 0-9
@@ -175,7 +259,7 @@
 (printf "Raw string: ~a\n" raw-string)
 
 ;; Cleanup
-(destroy-arena my-arena)
+(destroy-arena ll-arena)
 
 ;; ======== With-Arena Example ========
 (printf "\n=== With-arena scope example ===\n")

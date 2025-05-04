@@ -40,6 +40,18 @@
   (get-ffi-obj "arena_alloc" arena-lib
                (_fun _pointer _size -> _pointer)))
 
+(define arena-dealloc
+  (get-ffi-obj "arena_dealloc" arena-lib
+               (_fun _pointer _pointer -> _bool)))
+
+(define arena-stats
+  (get-ffi-obj "arena_stats" arena-lib
+               (_fun _pointer _pointer _pointer _pointer _pointer -> _bool)))
+
+(define arena-get-allocation-size
+  (get-ffi-obj "arena_get_allocation_size" arena-lib
+               (_fun _pointer _pointer -> _size)))
+
 (define arena-reset
   (get-ffi-obj "arena_reset" arena-lib
                (_fun _pointer -> _void)))
@@ -58,6 +70,44 @@
 
 (define (allocate-in-arena a size)
   (arena-alloc (arena-ptr a) size))
+
+(define (deallocate-arena-value value-fn)
+  (when value-fn
+    (let/ec return
+      (define ptr 
+        (with-handlers ([exn:fail? (lambda (e) (return #f))])
+          (value-fn 'ptr)))
+      (define a
+        (with-handlers ([exn:fail? (lambda (e) (return #f))])
+          (value-fn 'arena)))
+      (when (and ptr a)
+        (deallocate-from-arena a ptr)))))
+
+;; Low-level deallocate API
+(define (deallocate-from-arena a ptr)
+  (arena-dealloc (arena-ptr a) ptr))
+
+(define (arena-get-stats a)
+  (define buffer (make-bytes (* 4 8)))
+  
+  (define ptr (cast buffer _bytes _pointer))
+  
+  (define total-ptr ptr)
+  (define used-ptr (ptr-add ptr 8))
+  (define free-ptr (ptr-add ptr 16))
+  (define block-count-ptr (ptr-add ptr 24))
+  
+  (define success (arena-stats (arena-ptr a) total-ptr used-ptr free-ptr block-count-ptr))
+  
+  (if success
+      (hash 'total (ptr-ref total-ptr _size)
+            'used (ptr-ref used-ptr _size)
+            'free (ptr-ref free-ptr _size)
+            'block-count (ptr-ref block-count-ptr _size))
+      #f))
+
+(define (get-allocation-size a ptr)
+  (arena-get-allocation-size (arena-ptr a) ptr))
 
 (define (reset-arena a)
   (arena-reset (arena-ptr a)))
@@ -108,8 +158,10 @@
              (ptr-set! ptr type actual-value)
              (case-lambda
                [() (ptr-ref ptr type)]
-               [(arg) (if (eq? arg 'ptr) ptr
-                         (error (format "Invalid argument to ~a function" 'name)))]))
+               [(arg) (cond
+                        [(eq? arg 'ptr) ptr]
+                        [(eq? arg 'arena) arena]
+                        [else (error (format "Invalid argument to ~a function" 'name))])])) 
            (provide arena-name)))]))
 
 ;; ======== Array Operations Macro ========
@@ -139,14 +191,15 @@
              ;; Return a multi-dispatch function
              (case-lambda
                [(idx) (cond
-                        [(number? idx)                           
+                        [(number? idx) 
                          (if (< idx len)
                              (ptr-ref (ptr-add ptr (* idx type-size)) type)
                              (error 'arena-name "index out of bounds: ~a" idx))]
-                        [(eq? idx 'ptr) ptr]                    
-                        [(eq? idx 'len) len]                    
+                        [(eq? idx 'ptr) ptr]
+                        [(eq? idx 'arena) arena]
+                        [(eq? idx 'len) len]
                         [else (error "Invalid argument to array function")])]
-               [() (if (= len 1)                               
+               [() (if (= len 1)
                       (ptr-ref ptr type 0)
                       (error "Array has multiple elements, index required"))]))
            (provide arena-name)))]))
@@ -186,19 +239,19 @@
   (define bytes (+ len 1))  ;; Extra byte for NULL terminator
   (define ptr (arena bytes))
   
-  ;; Copy string data
+  ;; Copy string data & NULL terminator
   (for ([i (in-range len)]
         [c (in-string str)])
     (ptr-set! (ptr-add ptr i) _byte (char->integer c)))
-  
-  ;; Add NULL terminator
   (ptr-set! (ptr-add ptr len) _byte 0)
   
   ;; Return a multi-dispatch function
   (case-lambda
-    [() (cast ptr _pointer _string/utf-8)]             ;; Normal usage - get string
-    [(arg) (if (eq? arg 'ptr) ptr                      ;; Get pointer with 'ptr symbol
-               (error "Invalid argument to string function"))]))
+    [() (cast ptr _pointer _string/utf-8)]
+    [(arg) (cond
+             [(eq? arg 'ptr) ptr]
+             [(eq? arg 'arena) arena]
+             [else (error "Invalid argument to string function")])]))
 
 ;; Read string from pointer (when needed)
 (define (arena-string-ref ptr)
@@ -553,6 +606,10 @@
 ;; Export remaining functions not covered by the automatic export macros
 (provide make-arena
          allocate-in-arena
+         deallocate-from-arena
+         deallocate-arena-value
+         arena-get-stats
+         get-allocation-size
          reset-arena
          destroy-arena
          arena?

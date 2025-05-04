@@ -145,6 +145,12 @@
                    (list (* i 10.1) (* i 20.2)))
                  10))  ;; Explicit capacity of 10
 
+;; NOTE: The lambda function here is a generator that takes an index (i)
+;; and returns the initial values for the struct at that position:
+;; - For index 0: (0.0, 0.0)
+;; - For index 1: (10.1, 20.2)
+;; - For index 2: (20.2, 40.4)
+
 (printf "Points array (size: ~a, capacity: ~a):\n" 
         (points 'size) (points 'capacity))
 
@@ -290,6 +296,12 @@
                                  (list _int _double) 3
                                  (lambda (i) 
                                    (list (+ 201 i) (* (+ i 1) 40000.0)))))
+
+;; NOTE: lambda function here is a generator that takes an index (i)
+;; and returns the initial values for the struct at that position:
+;; - For index 0: (201, 40000.0)
+;; - For index 1: (202, 80000.0)
+;; - For index 2: (203, 120000.0)
 
 (printf "Original team:\n")
 (for ([i (in-range (team 'size))])

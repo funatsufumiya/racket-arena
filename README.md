@@ -1,6 +1,6 @@
 # racket-arena
 
-Experimental implementation of arena (memory segment) for Racket.
+arena allocation (memory segment) for Racket.
 
 # test (install)
 

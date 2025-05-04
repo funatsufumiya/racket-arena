@@ -10,6 +10,8 @@ see [examples/high-layer.rkt](examples/high-layer.rkt)
 
 (or [examples/low-layer.rkt](examples/low-layer.rkt) for low-layer API)
 
+There is also [performance test (allocation test)](examples/performance-check.rkt) for benchmark.
+
 ## Install and test
 
 ```bash

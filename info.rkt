@@ -3,5 +3,5 @@
 (define collection "arena")
 (define deps '("base"))
 (define build-deps '("scribble-lib" "racket-doc"))
-(define pkg-desc "Arena allocation (memory segment) for Racket (experimental)")
+(define pkg-desc "Arena allocation (memory segment) for Racket")
 (define version "0.1")

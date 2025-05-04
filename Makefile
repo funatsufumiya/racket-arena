@@ -6,7 +6,7 @@ all: build
 
 build:
 	cd src/rust && cargo build --release
-	mkdir -p native
+	# mkdir -p native
 	cp src/rust/target/release/libarena.* native/
 	rm -f native/libarena.d
 

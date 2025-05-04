@@ -33,7 +33,7 @@ see [docs/api.md](docs/api.md)
 
 ## Known issues
 
-- You probably cannot use string with capacity (dynamic length string) in complexed data structure using cstruct (Issue #4), although you can do simple array or string (see [examples/high-layer.rkt](examples/high-layer.rkt) for detail).
+- You probably cannot use string with capacity (dynamic length string) in complexed data structure using cstruct ([Issue #4](https://github.com/funatsufumiya/racket-arena/issues/4)), although you can do simple array or string (see [examples/high-layer.rkt](examples/high-layer.rkt) for detail).
   - We probabaly do not provide string-with-capacity data type (for this complexed usage). You should choose or create it as you like, or initialize with max-length string.
  
 ## Acknowledgment

@@ -421,8 +421,12 @@
     [() (ptr-ref (ptr-add ptr (car field-offsets)) (car field-types))]))
 
 ;; Allocate an array of C structs with field type information
-(define (arena-cstruct-array arena type field-types count [init-func #f])
-  ;; Calculate field offsets once
+(define (arena-cstruct-array arena type field-types count [init-func #f] [capacity count])
+  ;; Ensure capacity is at least the initial count
+  (when (< capacity count)
+    (error 'arena-cstruct-array "capacity (~a) must be >= initial count (~a)" capacity count))
+  
+  ;; Calculate field offsets (same as existing code)
   (define field-offsets 
     (let loop ([offset 0] [types field-types] [offsets '()])
       (if (null? types)
@@ -434,74 +438,174 @@
                   (cdr types) 
                   (cons aligned-offset offsets))))))
   
-  #;(printf "Array struct field offsets: ~a\n" field-offsets)
-  
-  ;; Calculate struct size with proper alignment
+  ;; Calculate struct size (same as existing code)
   (define struct-size 
     (if (null? field-offsets)
-        (ctype-sizeof type)  ;; Fallback to type's size
+        (ctype-sizeof type)
         (let* ([last-offset (last field-offsets)]
                [last-type (last field-types)]
                [last-size (ctype-sizeof last-type)])
           (+ last-offset last-size))))
   
-  (define total-size (* count struct-size))
+  ;; Add header size for capacity and current size
+  (define header-size 16)  ;; 8 bytes for capacity + 8 bytes for size
+  
+  ;; Calculate total memory size needed
+  (define data-size (* capacity struct-size))
+  (define total-size (+ header-size data-size))
+  
+  ;; Allocate memory
   (define ptr (arena total-size))
   
-  ;; Initialize each struct if init function is provided
+  ;; Set header information
+  (ptr-set! ptr _uint64 capacity)         ;; Store maximum capacity
+  (ptr-set! (ptr-add ptr 8) _uint64 count)  ;; Store current size
+  
+  ;; Initialize with values if provided
   (when init-func
     (for ([i (in-range count)])
-      (define struct-base-ptr (ptr-add ptr (* i struct-size)))
+      (define struct-offset (+ header-size (* i struct-size)))
+      (define struct-base-ptr (ptr-add ptr struct-offset))
       (define values (init-func i))
       
-      ;; Set field values using the appropriate types at correct offsets
+      ;; Set field values
       (for ([j (in-range (min (length values) (length field-types)))]
             [v (in-list values)]
             [ftype (in-list field-types)]
             [offset (in-list field-offsets)])
-        #;(printf "Setting array[~a] field ~a at offset ~a: type=~a, value=~a\n" 
-                i j offset ftype v)
         
-        ;; Ensure numeric values are properly converted to the target type
+        ;; Convert value if necessary
         (define actual-value
           (cond
             [(and (eq? ftype _double) (number? v)) (exact->inexact v)]
             [(and (eq? ftype _float) (number? v)) (exact->inexact v)]
             [else v]))
         
-        ;; Add field offset to struct base pointer
+        ;; Set the value
         (ptr-set! (ptr-add struct-base-ptr offset) ftype actual-value))))
   
-  ;; Return a multi-dispatch function
-  (case-lambda
-    [(idx) (cond
-             [(number? idx)                            ;; Get struct at index
-              (if (< idx count)
-                  (let ([struct-ptr (ptr-add ptr (* idx struct-size))])
-                    (case-lambda
-                      [(field-idx) (cond
-                                    [(number? field-idx) 
-                                     (if (< field-idx (length field-types))
-                                         ;; Access field by its offset
-                                         (ptr-ref (ptr-add struct-ptr 
-                                                           (list-ref field-offsets field-idx))
-                                                 (list-ref field-types field-idx))
-                                         (error 'arena-cstruct-array 
-                                                "field index out of bounds: ~a" field-idx))]
-                                    [(eq? field-idx 'ptr) struct-ptr]
-                                    [(eq? field-idx 'field-types) field-types]
-                                    [(eq? field-idx 'field-offsets) field-offsets]
-                                    [else (error "Invalid field index")])]
-                      [() (ptr-ref (ptr-add struct-ptr (car field-offsets)) 
-                                   (car field-types))]))
-                  (error 'arena-cstruct-array "index out of bounds: ~a" idx))]
-             [(eq? idx 'ptr) ptr]                     ;; Get base pointer
-             [(eq? idx 'len) count]                   ;; Get array length
-             [(eq? idx 'type) type]                   ;; Get struct type
-             [(eq? idx 'field-types) field-types]     ;; Get field types
-             [(eq? idx 'field-offsets) field-offsets] ;; Get field offsets
-             [else (error "Invalid argument to struct array function")])]
-    [() (error "Index required to access struct in array")]))
+  ;; Return multi-dispatch function
+  (lambda args
+    (cond
+      [(null? args)
+       (error "Index required to access struct in array")]
+      [(= (length args) 1)
+       (let ([arg (car args)])
+         (cond
+           [(number? arg)  ;; Access by index
+            (define current-size (ptr-ref (ptr-add ptr 8) _uint64))
+            (if (< arg current-size)
+                (let ([struct-offset (+ header-size (* arg struct-size))]
+                      [struct-ptr (ptr-add ptr (+ header-size (* arg struct-size)))])
+                  (lambda args
+                    (cond
+                      [(null? args)
+                       (error "Field index required")]
+                      [(= (length args) 1)
+                       (let ([field-idx (car args)])
+                         (cond
+                           [(number? field-idx)
+                            (if (< field-idx (length field-types))
+                                (ptr-ref (ptr-add struct-ptr
+                                                  (list-ref field-offsets field-idx))
+                                         (list-ref field-types field-idx))
+                                (error 'arena-cstruct-array
+                                       "field index out of bounds: ~a" field-idx))]
+                           [(eq? field-idx 'ptr) struct-ptr]
+                           [(eq? field-idx 'field-types) field-types]
+                           [(eq? field-idx 'field-offsets) field-offsets]
+                           [else (error "Invalid field index")]))]
+                      [else (error "Too many arguments")])))
+                (error 'arena-cstruct-array "index out of bounds: ~a (size: ~a)"
+                       arg current-size))]
+           [(eq? arg 'ptr) ptr]
+           [(eq? arg 'type) type]
+           [(eq? arg 'field-types) field-types]
+           [(eq? arg 'field-offsets) field-offsets]
+           [(eq? arg 'size) (ptr-ref (ptr-add ptr 8) _uint64)]
+           [(eq? arg 'capacity) (ptr-ref ptr _uint64)]
+           [else (error "Invalid argument to struct array function")]))]
+      [else (error "Too many arguments provided to array function")])))
+
+;; Add a new struct to the end of the array
+;; Returns #t if successful, #f if array is at capacity
+(define (arena-cstruct-array-push! array-fn init-values)
+  (define ptr (array-fn 'ptr))
+  (define type (array-fn 'type))
+  (define field-types (array-fn 'field-types))
+  (define field-offsets (array-fn 'field-offsets))
+  (define current-size (array-fn 'size))
+  (define capacity (array-fn 'capacity))
+  
+  ;; Check if array is full
+  (if (>= current-size capacity)
+      #f  ;; Return false if full
+      (let ()
+        ;; Calculate struct size
+        (define last-offset (last field-offsets))
+        (define last-type (last field-types))
+        (define last-size (ctype-sizeof last-type))
+        (define struct-size (+ last-offset last-size))
+        
+        ;; Calculate position for new struct
+        (define header-size 16)
+        (define struct-offset (+ header-size (* current-size struct-size)))
+        (define struct-ptr (ptr-add ptr struct-offset))
+        
+        ;; Set field values
+        (for ([i (in-range (min (length init-values) (length field-types)))]
+              [v (in-list init-values)]
+              [ftype (in-list field-types)]
+              [offset (in-list field-offsets)])
+          
+          ;; Convert value if necessary
+          (define actual-value
+            (cond
+              [(and (eq? ftype _double) (number? v)) (exact->inexact v)]
+              [(and (eq? ftype _float) (number? v)) (exact->inexact v)]
+              [else v]))
+          
+          ;; Set the value
+          (ptr-set! (ptr-add struct-ptr offset) ftype actual-value))
+        
+        ;; Update size
+        (ptr-set! (ptr-add ptr 8) _uint64 (add1 current-size))
+        
+        ;; Return success
+        #t)))
+
+;; Remove the last struct from the array
+;; Returns #t if successful, #f if array is empty
+(define (arena-cstruct-array-pop! array-fn)
+  (define current-size (array-fn 'size))
+  
+  ;; Check if array is empty
+  (if (= current-size 0)
+      #f  ;; Return false if empty
+      (let ()
+        ;; Get pointer to array
+        (define ptr (array-fn 'ptr))
+        
+        ;; Update size
+        (ptr-set! (ptr-add ptr 8) _uint64 (sub1 current-size))
+        
+        ;; Return success
+        #t)))
+
+;; Clear struct array (reset to empty)
+(define (arena-cstruct-array-clear! array-fn)
+  (define ptr (array-fn 'ptr))
+  
+  ;; Reset size to 0 (capacity remains the same)
+  (ptr-set! (ptr-add ptr 8) _uint64 0)
+  
+  ;; Return void
+  (void))
+
+;; Export struct array functions
+(provide arena-cstruct-array-push!
+         arena-cstruct-array-pop!
+         arena-cstruct-array-clear!)
 
 ;; ======== Setter Functions for Primitive Types ========
 ;; Macro to generate primitive type setters

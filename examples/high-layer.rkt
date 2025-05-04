@@ -26,11 +26,11 @@
 ;; Integer array example
 ;; Integer array example with capacity
 (define squares (arena-int-array my-arena '(0 1 4 9 16 25) 10))
-(printf "Squares length: ~a\n" (squares 'len))  ;; Get length
+(printf "Squares length: ~a\n" (squares 'size))  ;; Get length
 (printf "Squares capacity: ~a\n" (squares 'capacity))  ;; Get capacity
 
 (printf "Squares: ")
-(for ([i (in-range (squares 'len))])
+(for ([i (in-range (squares 'size))])
   (printf "~a " (squares i)))  ;; Access elements by index
 (printf "\n")
 
@@ -45,7 +45,7 @@
 (printf "New size: ~a\n" (arena-array-size squares))
 
 (printf "Updated squares: ")
-(for ([i (in-range (squares 'len))])
+(for ([i (in-range (squares 'size))])
   (printf "~a " (squares i)))
 (printf "\n")
 
@@ -71,25 +71,81 @@
 ;; Create a point struct in the arena with initial values and explicit field types
 (define point1 (arena-cstruct my-arena _point (list _double _double) (list 10.5 20.3)))
 
-
 ;; Access fields
 (printf "Point coordinates: (~a, ~a)\n" 
         (point1 0)  ;; x value (index 0)
         (point1 1)) ;; y value (index 1)
 
-;; Create struct array with explicit field types
+;; Create struct array with explicit field types and capacity
+;; Starting with 3 points but with room for 10
 (define points (arena-cstruct-array my-arena _point (list _double _double) 3
                  (lambda (i) 
-                   (list (* i 10.1) (* i 20.2)))))
+                   (list (* i 10.1) (* i 20.2)))
+                 10))  ;; Explicit capacity of 10
 
-(printf "Points array:\n")
-(for ([i (in-range (points 'len))])
+(printf "Points array (size: ~a, capacity: ~a):\n" 
+        (points 'size) (points 'capacity))
+
+(for ([i (in-range (points 'size))])
   (define point (points i))
   (printf "  Point ~a: (~a, ~a)\n" 
           i (point 0) (point 1)))
 
-;; Cleanup
+;; Add more points using push operation
+(printf "\nAdding more points:\n")
+
+(define new-point1 (list 50.0 75.5))
+(if (arena-cstruct-array-push! points new-point1)
+    (printf "  Added point: (~a, ~a)\n" (car new-point1) (cadr new-point1))
+    (printf "  Failed to add point (array full)\n"))
+
+(define new-point2 (list 42.0 88.8))
+(if (arena-cstruct-array-push! points new-point2)
+    (printf "  Added point: (~a, ~a)\n" (car new-point2) (cadr new-point2))
+    (printf "  Failed to add point (array full)\n"))
+
+;; Show updated array
+(printf "\nUpdated points array (size: ~a):\n" (points 'size))
+(for ([i (in-range (points 'size))])
+  (define point (points i))
+  (printf "  Point ~a: (~a, ~a)\n" 
+          i (point 0) (point 1)))
+
+;; Remove the last point
+(printf "\nRemoving last point:\n")
+(if (arena-cstruct-array-pop! points)
+    (printf "  Successfully removed the last point\n")
+    (printf "  Failed to remove (array empty)\n"))
+
+(printf "After removal (size: ~a):\n" (points 'size))
+(for ([i (in-range (points 'size))])
+  (define point (points i))
+  (printf "  Point ~a: (~a, ~a)\n" 
+          i (point 0) (point 1)))
+
+;; Clear all points
+(arena-cstruct-array-clear! points)
+(printf "\nAfter clearing, size: ~a (capacity still: ~a)\n" 
+        (points 'size) (points 'capacity))
+
+;; Add a new point after clearing
+(if (arena-cstruct-array-push! points (list 99.9 99.9))
+    (printf "Added new point after clearing: (99.9, 99.9)\n")
+    (printf "Failed to add after clearing\n"))
+
+;; Show final state
+(printf "\nFinal points array (size: ~a):\n" (points 'size))
+(for ([i (in-range (points 'size))])
+  (define point (points i))
+  (printf "  Point ~a: (~a, ~a)\n" 
+          i (point 0) (point 1)))
+
+;;
+;;
+;; Cleanup arena itself (destroy)
 (destroy-arena my-arena)
+;;
+;;
 
 ;; ======== Update Value Examples ========
 (printf "\n=== Value modification examples ===\n")
@@ -106,14 +162,14 @@
 ;; Array element updates
 (define data (arena-double-array update-arena '(1.1 2.2 3.3 4.4)))
 (printf "Original array: ")
-(for ([i (in-range (data 'len))])
+(for ([i (in-range (data 'size))])
   (printf "~a " (data i)))
 (printf "\n")
 
 (set-arena-double-array! data 1 2.5)
 (set-arena-double-array! data 3 4.9)
 (printf "Updated array: ")
-(for ([i (in-range (data 'len))])
+(for ([i (in-range (data 'size))])
   (printf "~a " (data i)))
 (printf "\n")
 
@@ -145,7 +201,7 @@
                                    (list (+ 201 i) (* (+ i 1) 40000.0)))))
 
 (printf "Original team:\n")
-(for ([i (in-range (team 'len))])
+(for ([i (in-range (team 'size))])
   (define member (team i))
   (printf "  Staff member ~a: ID=~a, Salary=~a\n" 
           i (member 0) (member 1)))
@@ -154,7 +210,7 @@
 (set-arena-struct-array-field! team 1 1 85000.0)
 
 (printf "After team update:\n")
-(for ([i (in-range (team 'len))])
+(for ([i (in-range (team 'size))])
   (define member (team i))
   (printf "  Staff member ~a: ID=~a, Salary=~a\n" 
           i (member 0) (member 1)))

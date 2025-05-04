@@ -1,58 +1,73 @@
 #lang racket/base
 
-;; NOTE: recommend to check high-layer.rkt first for High-level API usage
-
 (require arena
          ffi/unsafe)
 
-;; create arena with size 1MB
+(printf "\n=== Low-layer extended examples ===\n")
+
+;; Create arena with size 1MB
 (define my-arena (make-arena (* 1 1024 1024)))
 
-;; allocate string with length 10
-(define str-len 10)
-(define str-ptr (my-arena str-len))
-;; ** note (my-arena str-len) is short-hand for (allocate-in-arena my-arena str-len)
-
-;; write string data
-(for ([i (in-range str-len)])
+;; === Basic allocation example (from existing file) ===
+(define str-ptr (my-arena 10))
+(for ([i (in-range 5)])
   (ptr-set! (ptr-add str-ptr i) _byte (+ (char->integer #\A) i)))
+(ptr-set! (ptr-add str-ptr 5) _byte 0) ;; null terminator
 
-(printf "String data bytes: ")
-(for ([i (in-range str-len)])
-  (printf "~a " (ptr-ref str-ptr _byte i)))
-(printf "\n")
+(printf "Initial string: ~a\n" (cast str-ptr _pointer _string/utf-8))
 
-;; read string data
-(define result
-  (list->string
-   (for/list ([i (in-range str-len)])
-     (integer->char (ptr-ref str-ptr _byte i)))))
+;; === Deallocation example ===
+(printf "\n=== Low-level deallocation example ===\n")
 
-(printf "Allocated string: ~a\n" result)
+;; Get stats before deallocation
+(define before-stats (arena-get-stats my-arena))
+(printf "Before deallocation: Used=~a bytes\n"
+        (hash-ref before-stats 'used))
 
-;; reset arena
-(reset-arena my-arena)
+;; Show allocation size
+(define alloc-size (get-allocation-size my-arena str-ptr))
+(printf "Allocation size of string: ~a bytes\n" alloc-size)
 
-;; allocate integer array with size 5
-(define int-array-size 5)
-(define int-array-ptr (my-arena (* int-array-size (ctype-sizeof _int))))
+;; Deallocate the string explicitly
+(printf "Deallocating string...\n")
+(deallocate-from-arena my-arena str-ptr)
 
-;; write integer array
-(define int-size (ctype-sizeof _int))
-(for ([i (in-range int-array-size)])
-  (ptr-set! (ptr-add int-array-ptr (* i int-size)) _int (* i i)))
+;; Get stats after deallocation
+(define after-stats (arena-get-stats my-arena))
+(printf "After deallocation: Used=~a bytes\n"
+        (hash-ref after-stats 'used))
 
-(printf "Integer data bytes: ")
-(for ([i (in-range (* int-array-size (ctype-sizeof _int)))])
-  (printf "~a " (ptr-ref int-array-ptr _byte i)))
-(printf "\n")
+;; === Low-level modification example ===
+(printf "\n=== Low-level modification example ===\n")
 
-;; read integer array
-(define int-results
-  (for/list ([i (in-range int-array-size)])
-    (ptr-ref int-array-ptr _int i)))
+;; Allocate an int
+(define int-ptr (my-arena (ctype-sizeof _int)))
+(ptr-set! int-ptr _int 42)
+(printf "Initial int value: ~a\n" (ptr-ref int-ptr _int))
 
-(printf "Allocated integers: ~a\n" int-results)
+;; Modify directly
+(ptr-set! int-ptr _int 99)
+(printf "Modified int value: ~a\n" (ptr-ref int-ptr _int))
 
-;; destroy arena
+;; Allocate a string and modify it
+(define str2-len 15)
+(define str2-ptr (my-arena str2-len))
+
+;; Write initial string
+(define initial-str "Hello")
+(for ([i (in-range (string-length initial-str))])
+  (ptr-set! (ptr-add str2-ptr i) _byte (char->integer (string-ref initial-str i))))
+(ptr-set! (ptr-add str2-ptr (string-length initial-str)) _byte 0)
+
+(printf "Initial string: ~a\n" (cast str2-ptr _pointer _string/utf-8))
+
+;; Modify the string directly
+(define new-str "World!")
+(for ([i (in-range (string-length new-str))])
+  (ptr-set! (ptr-add str2-ptr i) _byte (char->integer (string-ref new-str i))))
+(ptr-set! (ptr-add str2-ptr (string-length new-str)) _byte 0)
+
+(printf "Modified string: ~a\n" (cast str2-ptr _pointer _string/utf-8))
+
+;; Cleanup
 (destroy-arena my-arena)

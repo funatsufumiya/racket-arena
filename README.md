@@ -37,6 +37,7 @@ see [docs/api.md](docs/api.md)
   - We probabaly do not provide string-with-capacity data type (for this complexed usage). You should choose or create it as you like, or initialize with max-length string.
   - This is same for array (complexed array).
 - We don't have hash table API yet ([Issue #5](https://github.com/funatsufumiya/racket-arena/issues/5)).
+  - We may provide implementation for the most simple case of this, but in the future.
 
 ## Acknowledgment
 

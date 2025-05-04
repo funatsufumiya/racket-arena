@@ -18,8 +18,8 @@ all: build
 build-win:
 	cd src\rust && cargo build --release
 	if not exist native mkdir native
-	copy src\rust\target\release\arena.dll native\
-	copy src\rust\target\release\arena.lib native\
+	copy src\rust\target\release\arena.dll native\libarena.dll
+	copy src\rust\target\release\arena.lib native\libarena.lib
 	del /Q native\*.d native\*.exp native\*.pdb 2>nul || echo No files to delete.
 
 build:
